@@ -1,0 +1,14 @@
+[project]
+name = "sketch-to-character"
+version = "0.1.0"
+description = "AI sketch to character web app"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.136.1",
+    "modal>=1.4.3",
+    "pydantic>=2.13.4",
+    "python-dotenv>=1.2.2",
+    "uvicorn>=0.47.0",
+]
+
+[tool.uv]
