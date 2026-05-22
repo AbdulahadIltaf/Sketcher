@@ -1,0 +1,5 @@
+.venv
+backend_local.py
+backend.py
+.env
+**/*.pyc
