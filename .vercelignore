@@ -3,3 +3,6 @@ backend_local.py
 backend.py
 .env
 **/*.pyc
+requirements.txt
+pyproject.toml
+uv.lock
