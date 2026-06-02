@@ -15,7 +15,8 @@ cuda_image = (
     modal.Image.debian_slim(python_version="3.10")
     .pip_install(
         "diffusers==0.26.3",
-        "transformers",
+        "huggingface-hub==0.23.5",
+        "transformers==4.38.2",
         "accelerate",
         "torch",
         "Pillow",
@@ -30,7 +31,7 @@ with cuda_image.imports():
     from diffusers import StableDiffusionXLControlNetPipeline, ControlNetModel, EulerAncestralDiscreteScheduler
 
 # 3. Create the Production Service Class
-@app.cls(image=cuda_image, gpu="L4", timeout=60, min_containers=0, max_containers=5)
+@app.cls(image=cuda_image, gpu="L4", timeout=60, startup_timeout=800, min_containers=0, max_containers=5)
 class CharacterEngine:
     @modal.enter()
     def load_pipeline(self):
@@ -40,7 +41,8 @@ class CharacterEngine:
         # Load structural control constraints
         controlnet = ControlNetModel.from_pretrained(
             "xinsir/anime-painter", 
-            torch_dtype=torch.float16
+            torch_dtype=torch.float16,
+            use_safetensors=True
         )
         
         # Base engine model choice optimized for vibrant cartoon/anime styles
@@ -57,9 +59,8 @@ class CharacterEngine:
         self.pipe.to("cuda")
         print("✅ Pipeline fully loaded into VRAM.")
 
-    @modal.fastapi_endpoint(method="POST", label="generate-character")
-    def process_image(self, request_data: dict):
-        """Secure Web API Endpoint wrapper"""
+    def process_image_internal(self, request_data: dict):
+        """Internal image generation method"""
         import base64
         
         # Extract frontend variables
@@ -99,3 +100,25 @@ class CharacterEngine:
         img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
         
         return {"status": "success", "image": f"data:image/png;base64,{img_str}"}
+
+    @modal.asgi_app(label="generate-character")
+    def fastapi_app(self):
+        from fastapi import FastAPI
+        from fastapi.middleware.cors import CORSMiddleware
+        
+        web_app = FastAPI()
+        
+        web_app.add_middleware(
+            CORSMiddleware,
+            allow_origins=["*"],
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+        
+        @web_app.post("/")
+        async def generate(request_data: dict):
+            return self.process_image_internal(request_data)
+            
+        return web_app
+
