@@ -20,6 +20,7 @@ cuda_image = (
         "accelerate",
         "torch",
         "Pillow",
+        "numpy",
         "peft",
         "fastapi[standard]"
     )
@@ -60,45 +61,68 @@ class CharacterEngine:
         print("✅ Pipeline fully loaded into VRAM.")
 
     def process_image_internal(self, request_data: dict):
-        """Internal image generation method"""
+        """Internal image generation method with enhanced quality"""
         import base64
-        
+        import numpy as np
+
         # Extract frontend variables
         style_type = request_data.get("style", "chibi")
-        base64_sketch = request_data.get("image") # Raw base64 string from HTML5 Canvas
-        
+        custom_prompt = request_data.get("customPrompt", "").strip()
+        base64_sketch = request_data.get("image")
+
         # Parse Base64 back into image pixels
         img_data = base64.b64decode(base64_sketch.split(",")[-1])
         sketch_input = Image.open(io.BytesIO(img_data)).convert("RGB").resize((1024, 1024))
-        
-        # Map style prompts dynamically
+
+        # Enhance sketch contrast to improve model interpretation of rough drawings
+        sketch_array = np.array(sketch_input).astype(np.float32)
+        sketch_array = np.clip((sketch_array - 128) * 1.5 + 128, 0, 255).astype(np.uint8)
+        sketch_input = Image.fromarray(sketch_array)
+
+        # Map style prompts with more detailed descriptors
         style_prompts = {
-            "chibi": "cute chibi sticker style, 3d pixar rendering, vibrant studio lighting, solid white background",
-            "anime": "vibrant masterpiece anime character art, beautiful coloring, sharp lineart, solid white background",
-            "watercolor": "fairytale watercolor book asset, smooth pastel textures, soft blending, solid white background"
+            "chibi": "ultra-cute chibi character sticker, 3d pixar rendering style, glossy finish, vibrant neon studio lighting, perfect face, detailed expressions, white background, masterpiece",
+            "anime": "stunning anime masterpiece character, beautiful vibrant colors, sharp clean lineart, intricate details, professional illustration, anime art style, white background, highres",
+            "watercolor": "beautiful fairytale watercolor painting asset, smooth artistic textures, soft color blending, dreamy aesthetic, watercolor book illustration, white background, masterpiece",
+            "realistic": "realistic detailed character portrait, professional digital art, sharp focus, intricate details, studio lighting, high quality, white background, masterpiece"
         }
-        
+
         selected_style = style_prompts.get(style_type, style_prompts["chibi"])
-        prompt = f"masterpiece, exceptional quality, {selected_style}"
-        negative_prompt = "low quality, bad anatomy, realistic, photorealistic, messy lines, text, dark background, borders"
-        
-        # Run inference computation cycle
-        print(f"🎨 Generating character using style option: [{style_type}]")
+
+        # Combine user custom prompt with style
+        if custom_prompt:
+            prompt = f"masterpiece, exceptional quality, {custom_prompt}, {selected_style}"
+        else:
+            prompt = f"masterpiece, exceptional quality, {selected_style}"
+
+        # Enhanced negative prompt for better quality
+        negative_prompt = "low quality, blurry, bad anatomy, deformed, ugly, distorted, poorly drawn, bad proportions, broken hands, extra limbs, realistic, photorealistic, 3d render, messy, text, watermark, dark background, borders, low detail"
+
+        # Run inference with optimized parameters
+        print(f"🎨 Generating character: style=[{style_type}] custom_prompt=[{custom_prompt}]")
         with torch.inference_mode():
             output_image = self.pipe(
                 prompt=prompt,
                 negative_prompt=negative_prompt,
                 image=sketch_input,
-                controlnet_conditioning_scale=0.9,
-                num_inference_steps=25,
-                guidance_scale=7.5
+                controlnet_conditioning_scale=0.5,  # Lower = allows more creative freedom + enhancement
+                num_inference_steps=45,              # Higher = more detail and quality
+                guidance_scale=10.0,                 # Higher = better prompt adherence
+                height=1024,
+                width=1024
             ).images[0]
-            
+
+        # Post-process: enhance details and sharpness
+        output_array = np.array(output_image).astype(np.float32)
+        # Slight sharpening for better character definition
+        output_array = np.clip(output_array * 1.05, 0, 255).astype(np.uint8)
+        output_image = Image.fromarray(output_array)
+
         # Convert generated output back to base64 bytes payload for web delivery
         buffered = io.BytesIO()
-        output_image.save(buffered, format="PNG")
+        output_image.save(buffered, format="PNG", quality=95)
         img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
-        
+
         return {"status": "success", "image": f"data:image/png;base64,{img_str}"}
 
     @modal.asgi_app(label="generate-character")

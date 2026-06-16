@@ -6,10 +6,12 @@ export default function CharacterCreator() {
   const [isDrawing, setIsDrawing] = useState(false);
   const [style, setStyle] = useState('chibi');
   const [brushSize, setBrushSize] = useState(8);
+  const [brushColor, setBrushColor] = useState('#ffffff');
+  const [customPrompt, setCustomPrompt] = useState('');
   const [loading, setLoading] = useState(false);
   const [resultImage, setResultImage] = useState(null);
   const [elapsedTime, setElapsedTime] = useState(0);
-  
+
   // History stack for Undo/Redo
   const [history, setHistory] = useState([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
@@ -91,15 +93,16 @@ export default function CharacterCreator() {
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
     const rect = canvas.getBoundingClientRect();
-    
+
     const clientX = e.touches ? e.touches[0].clientX : e.clientX;
     const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-    
+
     ctx.beginPath();
     ctx.moveTo(clientX - rect.left, clientY - rect.top);
     ctx.lineWidth = brushSize;
     ctx.lineCap = 'round';
-    ctx.strokeStyle = 'white';
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = brushColor;
     setIsDrawing(true);
   };
 
@@ -149,15 +152,19 @@ export default function CharacterCreator() {
 
     try {
       const targetEndpoint = "https://iltafabdulahad--generate-character.modal.run";
-      
+
       const response = await fetch(targetEndpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: base64Image, style: style }),
+        body: JSON.stringify({
+          image: base64Image,
+          style: style,
+          customPrompt: customPrompt
+        }),
       });
 
       if (!response.ok) throw new Error("Server responded with error status");
-      
+
       const data = await response.json();
       if (data.status === 'success') {
         setResultImage(data.image);
@@ -321,7 +328,30 @@ export default function CharacterCreator() {
 
             {/* Workspace Controls */}
             <div style={{ marginTop: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-              
+
+              {/* Color Picker */}
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem', fontSize: '0.9rem' }}>
+                  <span style={{ color: 'var(--text-secondary)' }}>Brush Color:</span>
+                  <span style={{ color: '#fff', fontWeight: 600 }}>
+                    <input
+                      type="color"
+                      value={brushColor}
+                      onChange={(e) => setBrushColor(e.target.value)}
+                      disabled={loading}
+                      style={{
+                        width: '40px',
+                        height: '30px',
+                        border: '1px solid rgba(255,255,255,0.1)',
+                        borderRadius: '6px',
+                        cursor: 'pointer'
+                      }}
+                      title="Pick brush color"
+                    />
+                  </span>
+                </div>
+              </div>
+
               {/* Brush size slider */}
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem', fontSize: '0.9rem' }}>
@@ -432,7 +462,7 @@ export default function CharacterCreator() {
             
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
               <h2 style={{ fontSize: '1.25rem', fontWeight: 600, color: '#f3f4f6' }}>Generated Studio Asset</h2>
-              
+
               {/* Style Option selector */}
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Style:</span>
@@ -454,8 +484,39 @@ export default function CharacterCreator() {
                   <option value="chibi">🤖 3D Pixar</option>
                   <option value="anime">🌸 Anime Art</option>
                   <option value="watercolor">🎨 Watercolor</option>
+                  <option value="realistic">✨ Realistic</option>
                 </select>
               </div>
+            </div>
+
+            {/* Custom Prompt Input */}
+            <div style={{ marginBottom: '1.25rem' }}>
+              <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
+                ✏️ Custom Description (Optional):
+              </label>
+              <textarea
+                value={customPrompt}
+                onChange={(e) => setCustomPrompt(e.target.value)}
+                disabled={loading}
+                placeholder="e.g., 'warrior princess with blue eyes and golden armor', 'cute cat wizard with stars'"
+                style={{
+                  width: '100%',
+                  padding: '10px 12px',
+                  background: '#1e293b',
+                  color: '#fff',
+                  border: '1px solid rgba(255,255,255,0.1)',
+                  borderRadius: '8px',
+                  fontSize: '0.85rem',
+                  outline: 'none',
+                  fontFamily: 'inherit',
+                  minHeight: '60px',
+                  resize: 'vertical',
+                  cursor: loading ? 'not-allowed' : 'text'
+                }}
+              />
+              <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
+                💡 Tip: Describe your character for better AI understanding (e.g., "pirate captain", "space explorer", "dragon hunter")
+              </p>
             </div>
 
             {/* Asset Display Frame */}
