@@ -12,6 +12,10 @@ export default function CharacterCreator() {
   const [resultImage, setResultImage] = useState(null);
   const [elapsedTime, setElapsedTime] = useState(0);
 
+  // Model warm-up state: 'warming' | 'ready' | 'error'
+  const [modelStatus, setModelStatus] = useState('warming');
+  const [warmupTime, setWarmupTime] = useState(0);
+
   // History stack for Undo/Redo
   const [history, setHistory] = useState([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
@@ -37,7 +41,36 @@ export default function CharacterCreator() {
     clearCanvas('creature'); // Default to creature guide to welcome the user
   }, []);
 
-  // Timer for Progress estimation
+  // Warm-up: ping /health on mount to eagerly boot the GPU container
+  const BACKEND = "https://iltafabdulahad--generate-character.modal.run";
+  useEffect(() => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5 * 60 * 1000);
+
+    fetch(`${BACKEND}/health`, { signal: controller.signal })
+      .then(res => res.json())
+      .then(data => {
+        clearTimeout(timeoutId);
+        if (data.status === 'ready') setModelStatus('ready');
+        else setModelStatus('error');
+      })
+      .catch(err => {
+        clearTimeout(timeoutId);
+        if (err.name !== 'AbortError') setModelStatus('error');
+        else setModelStatus('error'); // timed out
+      });
+
+    return () => controller.abort();
+  }, []);
+
+  // Warm-up elapsed timer
+  useEffect(() => {
+    if (modelStatus !== 'warming') return;
+    const interval = setInterval(() => setWarmupTime(t => t + 1), 1000);
+    return () => clearInterval(interval);
+  }, [modelStatus]);
+
+  // Timer for generation Progress estimation
   useEffect(() => {
     let interval;
     if (loading) {
@@ -150,12 +183,15 @@ export default function CharacterCreator() {
     const canvas = canvasRef.current;
     const base64Image = canvas.toDataURL('image/png');
 
-    try {
-      const targetEndpoint = "https://iltafabdulahad--generate-character.modal.run";
+    // Allow up to 5 minutes — cold-start GPU containers need time to load model weights
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5 * 60 * 1000);
 
-      const response = await fetch(targetEndpoint, {
+    try {
+      const response = await fetch(BACKEND, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
         body: JSON.stringify({
           image: base64Image,
           style: style,
@@ -163,17 +199,24 @@ export default function CharacterCreator() {
         }),
       });
 
-      if (!response.ok) throw new Error("Server responded with error status");
+      clearTimeout(timeoutId);
+
+      if (!response.ok) throw new Error(`Server error: ${response.status}`);
 
       const data = await response.json();
       if (data.status === 'success') {
         setResultImage(data.image);
       } else {
-        alert("Generation issue encountered. Please test again.");
+        alert("Generation issue encountered. Please try again.");
       }
     } catch (err) {
+      clearTimeout(timeoutId);
       console.error(err);
-      alert("Backend connection timeout or error. Please check your Modal deployment.");
+      if (err.name === 'AbortError') {
+        alert("Request timed out after 5 minutes. The GPU container may be overloaded — please try again.");
+      } else {
+        alert(`Connection error: ${err.message}. Make sure your Modal deployment is running.`);
+      }
     } finally {
       setLoading(false);
     }
@@ -190,20 +233,23 @@ export default function CharacterCreator() {
   };
 
   // Helper values for Progress
+  // Cold-start: model download + VRAM load can take 60-120s on first request
   const progressPercentage = (() => {
     if (!loading) return 0;
-    if (elapsedTime < 5) return elapsedTime * 6;          // 0-30% during cold start wait
-    if (elapsedTime < 12) return 30 + (elapsedTime - 5) * 7;  // 30-79% during inference
-    if (elapsedTime < 20) return 79 + (elapsedTime - 12) * 2;  // 79-95% finishing up
-    return Math.min(95 + (elapsedTime - 20) * 0.2, 99);
+    if (elapsedTime < 10) return elapsedTime * 2;              // 0-20%: sending + container boot
+    if (elapsedTime < 60) return 20 + (elapsedTime - 10) * 0.8; // 20-60%: model loading into VRAM
+    if (elapsedTime < 80) return 60 + (elapsedTime - 60) * 1.5; // 60-90%: inference running
+    if (elapsedTime < 100) return 90 + (elapsedTime - 80) * 0.4; // 90-98%: finalizing
+    return Math.min(98 + (elapsedTime - 100) * 0.05, 99);
   })();
 
   const progressMessage = (() => {
-    if (elapsedTime < 4) return "🧠 Sending sketch to AI...";
-    if (elapsedTime < 8) return "🎨 Analyzing sketch outlines...";
-    if (elapsedTime < 15) return "✨ Denoising and painting pixels...";
-    if (elapsedTime < 22) return "🚀 Finalizing cartoon character...";
-    return `⚡ Cold-start active: Booting up GPU container... (${elapsedTime}s elapsed)`;
+    if (elapsedTime < 5) return "🧠 Sending sketch to AI...";
+    if (elapsedTime < 20) return "⚡ Booting GPU container (cold start)...";
+    if (elapsedTime < 60) return "📦 Loading AI model weights into VRAM...";
+    if (elapsedTime < 75) return "🎨 Analyzing sketch outlines...";
+    if (elapsedTime < 90) return "✨ Denoising and painting pixels...";
+    return `🚀 Finalizing character... (${elapsedTime}s — almost there!)`;
   })();
 
   return (
@@ -227,6 +273,105 @@ export default function CharacterCreator() {
             Draw a sketch, choose a style, and let AI transform your art into a studio-ready asset!
           </p>
         </header>
+
+        {/* Model Warm-up Status Banner */}
+        <div style={{
+          marginBottom: '2rem',
+          borderRadius: '12px',
+          overflow: 'hidden',
+          border: modelStatus === 'ready'
+            ? '1px solid rgba(34, 197, 94, 0.3)'
+            : modelStatus === 'error'
+              ? '1px solid rgba(239, 68, 68, 0.3)'
+              : '1px solid rgba(99, 102, 241, 0.3)',
+          background: modelStatus === 'ready'
+            ? 'rgba(34, 197, 94, 0.06)'
+            : modelStatus === 'error'
+              ? 'rgba(239, 68, 68, 0.06)'
+              : 'rgba(99, 102, 241, 0.06)',
+          transition: 'all 0.5s ease',
+        }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: '1rem', padding: '0.875rem 1.25rem'
+          }}>
+
+            {/* Status icon */}
+            {modelStatus === 'warming' && (
+              <div style={{
+                width: '20px', height: '20px', flexShrink: 0,
+                border: '3px solid rgba(99,102,241,0.2)',
+                borderTop: '3px solid #818cf8',
+                borderRadius: '50%',
+                animation: 'spin 1s linear infinite',
+              }} />
+            )}
+            {modelStatus === 'ready' && (
+              <div style={{ fontSize: '1.1rem', flexShrink: 0 }}>✅</div>
+            )}
+            {modelStatus === 'error' && (
+              <div style={{ fontSize: '1.1rem', flexShrink: 0 }}>⚠️</div>
+            )}
+
+            {/* Status text */}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              {modelStatus === 'warming' && (
+                <>
+                  <p style={{ margin: 0, fontWeight: 600, fontSize: '0.9rem', color: '#a5b4fc' }}>
+                    Warming up GPU — loading AI model into VRAM...
+                  </p>
+                  <p style={{ margin: '2px 0 0', fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                    Generation will unlock automatically. Cold start may take 30–90s. ({warmupTime}s elapsed)
+                  </p>
+                </>
+              )}
+              {modelStatus === 'ready' && (
+                <p style={{ margin: 0, fontWeight: 600, fontSize: '0.9rem', color: '#4ade80' }}>
+                  GPU model ready — draw your sketch and generate!
+                </p>
+              )}
+              {modelStatus === 'error' && (
+                <p style={{ margin: 0, fontWeight: 600, fontSize: '0.9rem', color: '#f87171' }}>
+                  Could not reach the backend. The Modal deployment may be offline.
+                </p>
+              )}
+            </div>
+
+            {/* Retry button on error */}
+            {modelStatus === 'error' && (
+              <button
+                onClick={() => {
+                  setModelStatus('warming');
+                  setWarmupTime(0);
+                  fetch(`${BACKEND}/health`, { signal: new AbortController().signal })
+                    .then(r => r.json())
+                    .then(d => setModelStatus(d.status === 'ready' ? 'ready' : 'error'))
+                    .catch(() => setModelStatus('error'));
+                }}
+                style={{
+                  flexShrink: 0, padding: '6px 14px', fontSize: '0.8rem', fontWeight: 600,
+                  background: 'rgba(239,68,68,0.15)', color: '#f87171',
+                  border: '1px solid rgba(239,68,68,0.3)', borderRadius: '8px', cursor: 'pointer'
+                }}
+              >
+                Retry
+              </button>
+            )}
+
+          </div>
+
+          {/* Warm-up progress bar */}
+          {modelStatus === 'warming' && (
+            <div style={{ height: '3px', background: 'rgba(99,102,241,0.1)' }}>
+              <div style={{
+                height: '100%',
+                width: `${Math.min((warmupTime / 90) * 100, 95)}%`,
+                background: 'linear-gradient(90deg, #6366f1, #818cf8)',
+                transition: 'width 1s ease-out',
+                borderRadius: '0 2px 2px 0',
+              }} />
+            </div>
+          )}
+        </div>
 
         {/* Dashboard Grid */}
         <div style={{
@@ -653,19 +798,21 @@ export default function CharacterCreator() {
         <div style={{ textAlign: 'center', marginTop: '3.5rem', marginBottom: '2rem' }}>
           <button
             onClick={handleGeneration}
-            disabled={loading}
+            disabled={loading || modelStatus !== 'ready'}
             style={{
               padding: '16px 40px',
               fontSize: '1.2rem',
               fontWeight: 700,
               color: '#fff',
-              background: loading 
+              background: loading
                 ? 'rgba(255,255,255,0.05)'
-                : 'linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%)',
-              border: 'none',
+                : modelStatus !== 'ready'
+                  ? 'rgba(255,255,255,0.05)'
+                  : 'linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%)',
+              border: modelStatus === 'warming' ? '1px solid rgba(99,102,241,0.3)' : 'none',
               borderRadius: '12px',
-              cursor: loading ? 'not-allowed' : 'pointer',
-              boxShadow: loading ? 'none' : '0 10px 25px -5px rgba(139, 92, 246, 0.4)',
+              cursor: (loading || modelStatus !== 'ready') ? 'not-allowed' : 'pointer',
+              boxShadow: (loading || modelStatus !== 'ready') ? 'none' : '0 10px 25px -5px rgba(139, 92, 246, 0.4)',
               transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
               letterSpacing: '-0.01em',
               display: 'inline-flex',
@@ -673,28 +820,29 @@ export default function CharacterCreator() {
               gap: '8px'
             }}
             onMouseEnter={(e) => {
-              if (!loading) {
+              if (!loading && modelStatus === 'ready') {
                 e.target.style.transform = 'translateY(-2px)';
                 e.target.style.boxShadow = '0 12px 28px -3px rgba(139, 92, 246, 0.5)';
               }
             }}
             onMouseLeave={(e) => {
-              if (!loading) {
+              if (!loading && modelStatus === 'ready') {
                 e.target.style.transform = 'none';
                 e.target.style.boxShadow = '0 10px 25px -5px rgba(139, 92, 246, 0.4)';
               }
             }}
           >
             {loading ? (
-              <>
-                <span>🎨 Painting Your Character... ({elapsedTime}s)</span>
-              </>
+              <span>🎨 Painting Your Character... ({elapsedTime}s)</span>
+            ) : modelStatus === 'warming' ? (
+              <span>⏳ Warming up GPU... please wait</span>
+            ) : modelStatus === 'error' ? (
+              <span>⚠️ Backend Offline — check Modal deployment</span>
             ) : (
-              <>
-                <span>🚀 Transform to Character!</span>
-              </>
+              <span>🚀 Transform to Character!</span>
             )}
           </button>
+
         </div>
 
       </div>
