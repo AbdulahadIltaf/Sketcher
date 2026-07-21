@@ -11,22 +11,7 @@ load_dotenv()
 app = modal.App("sketch-to-character-v2")
 
 
-def download_models():
-    """Bakes model weights into the image layer at build time - eliminates HF download on cold start.
-    Uses snapshot_download to pull raw files only — avoids pipeline component validation errors."""
-    from huggingface_hub import snapshot_download
-
-    print("[DOWNLOAD] Pre-downloading ControlNet weights (xinsir/anime-painter)...")
-    snapshot_download("xinsir/anime-painter")
-
-    print("[DOWNLOAD] Pre-downloading Animagine-XL weights (cagliostrolab/animagine-xl-3.1)...")
-    snapshot_download("cagliostrolab/animagine-xl-3.1")
-
-    print("[DOWNLOAD] All model weights cached into image layer.")
-
-
-# Create a clean linux build image with exactly the required dependencies
-# .run_function() bakes model weights into the image - cold-start skips HuggingFace download
+# Create a clean linux build image with the required dependencies
 cuda_image = (
     modal.Image.debian_slim(python_version="3.10")
     .pip_install(
@@ -40,16 +25,16 @@ cuda_image = (
         "peft",
         "fastapi[standard]"
     )
-    .run_function(download_models, gpu="L4")
 )
 
-# 2. Import GPU libs inside the image context
+# Import GPU libs inside the image context
 with cuda_image.imports():
     import torch
     from diffusers import StableDiffusionXLControlNetPipeline, ControlNetModel, EulerAncestralDiscreteScheduler
 
-# 3. Create the Production Service Class
-# timeout=300 covers warm inference; startup_timeout=600 covers VRAM load from cached image
+# Production Service Class
+# startup_timeout=600: allows up to 10 min for model download + VRAM load on cold start
+# timeout=300: covers inference time per request
 @app.cls(image=cuda_image, gpu="L4", timeout=300, startup_timeout=600, min_containers=0, max_containers=5)
 class CharacterEngine:
     @modal.enter()
