@@ -32,7 +32,7 @@ with cuda_image.imports():
     from diffusers import StableDiffusionXLControlNetPipeline, ControlNetModel, EulerAncestralDiscreteScheduler
 
 # 3. Create the Production Service Class
-@app.cls(image=cuda_image, gpu="L4", timeout=60, startup_timeout=800, min_containers=0, max_containers=5)
+@app.cls(image=cuda_image, gpu="L4", timeout=180, startup_timeout=800, min_containers=0, max_containers=5)
 class CharacterEngine:
     @modal.enter()
     def load_pipeline(self):
@@ -72,7 +72,7 @@ class CharacterEngine:
 
         # Parse Base64 back into image pixels
         img_data = base64.b64decode(base64_sketch.split(",")[-1])
-        sketch_input = Image.open(io.BytesIO(img_data)).convert("RGB").resize((1024, 1024))
+        sketch_input = Image.open(io.BytesIO(img_data)).convert("RGB").resize((768, 768))
 
         # Enhance sketch contrast to improve model interpretation of rough drawings
         sketch_array = np.array(sketch_input).astype(np.float32)
@@ -106,10 +106,10 @@ class CharacterEngine:
                 negative_prompt=negative_prompt,
                 image=sketch_input,
                 controlnet_conditioning_scale=0.5,  # Lower = allows more creative freedom + enhancement
-                num_inference_steps=45,              # Higher = more detail and quality
-                guidance_scale=10.0,                 # Higher = better prompt adherence
-                height=1024,
-                width=1024
+                num_inference_steps=20,              # Reduced for speed while keeping good quality
+                guidance_scale=7.5,                  # Balanced adherence vs creativity
+                height=768,
+                width=768
             ).images[0]
 
         # Post-process: enhance details and sharpness

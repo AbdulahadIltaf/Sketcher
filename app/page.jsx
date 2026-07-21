@@ -192,17 +192,17 @@ export default function CharacterCreator() {
   // Helper values for Progress
   const progressPercentage = (() => {
     if (!loading) return 0;
-    if (elapsedTime < 3) return elapsedTime * 10;
-    if (elapsedTime < 10) return 30 + (elapsedTime - 3) * 5;
-    if (elapsedTime < 25) return 65 + (elapsedTime - 10) * 1.5;
-    return Math.min(87.5 + (elapsedTime - 25) * 0.2, 98);
+    if (elapsedTime < 5) return elapsedTime * 6;          // 0-30% during cold start wait
+    if (elapsedTime < 12) return 30 + (elapsedTime - 5) * 7;  // 30-79% during inference
+    if (elapsedTime < 20) return 79 + (elapsedTime - 12) * 2;  // 79-95% finishing up
+    return Math.min(95 + (elapsedTime - 20) * 0.2, 99);
   })();
 
   const progressMessage = (() => {
-    if (elapsedTime < 3) return "🧠 Instantiating AI Engine...";
-    if (elapsedTime < 7) return "🎨 Analyzing sketch outlines...";
-    if (elapsedTime < 12) return "✨ Denoising and painting pixels...";
-    if (elapsedTime < 18) return "🚀 Finalizing cartoon character...";
+    if (elapsedTime < 4) return "🧠 Sending sketch to AI...";
+    if (elapsedTime < 8) return "🎨 Analyzing sketch outlines...";
+    if (elapsedTime < 15) return "✨ Denoising and painting pixels...";
+    if (elapsedTime < 22) return "🚀 Finalizing cartoon character...";
     return `⚡ Cold-start active: Booting up GPU container... (${elapsedTime}s elapsed)`;
   })();
 
